@@ -1,0 +1,14 @@
+{
+  "name": "email-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "email-mcp-server.js",
+  "scripts": {
+    "start": "node email-mcp-server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "latest",
+    "nodemailer": "latest",
+    "zod": "latest"
+  }
+}
