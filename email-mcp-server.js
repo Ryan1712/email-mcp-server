@@ -70,7 +70,7 @@ app.post("/oauth/token", (req, res) => {
   });
 });
 
-app.get("/sse", async (req, res) => {
+function createMcpServer() {
   const server = new McpServer({
     name: "email-sender",
     version: "1.0.0"
@@ -108,6 +108,19 @@ app.get("/sse", async (req, res) => {
     }
   );
 
+  return server;
+}
+
+app.get("/sse", async (req, res) => {
+  const server = createMcpServer();
+  const transport = new SSEServerTransport("/messages", res);
+  transports[transport.sessionId] = transport;
+  await server.connect(transport);
+  res.on("close", () => delete transports[transport.sessionId]);
+});
+
+app.get("/mcp", async (req, res) => {
+  const server = createMcpServer();
   const transport = new SSEServerTransport("/messages", res);
   transports[transport.sessionId] = transport;
   await server.connect(transport);
