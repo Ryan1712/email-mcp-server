@@ -1,7 +1,7 @@
 import express from "express";
 import nodemailer from "nodemailer";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import crypto from "crypto";
 
@@ -17,9 +17,7 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-const tokens = new Set();
 const clients = {};
-const transports = {};
 
 app.get("/.well-known/oauth-authorization-server", (req, res) => {
   const base = `https://${req.headers.host}`;
@@ -35,15 +33,12 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
 });
 
 app.post("/oauth/register", (req, res) => {
-  const newClientId = crypto.randomUUID();
-  const newClientSecret = crypto.randomUUID();
-  clients[newClientId] = {
-    client_secret: newClientSecret,
-    redirect_uris: req.body.redirect_uris || []
-  };
+  const clientId = crypto.randomUUID();
+  const clientSecret = crypto.randomUUID();
+  clients[clientId] = { clientSecret, redirect_uris: req.body.redirect_uris || [] };
   res.status(201).json({
-    client_id: newClientId,
-    client_secret: newClientSecret,
+    client_id: clientId,
+    client_secret: clientSecret,
     redirect_uris: req.body.redirect_uris || [],
     grant_types: ["authorization_code"],
     response_types: ["code"],
@@ -61,10 +56,8 @@ app.get("/oauth/authorize", (req, res) => {
 });
 
 app.post("/oauth/token", (req, res) => {
-  const token = crypto.randomUUID();
-  tokens.add(token);
   res.json({
-    access_token: token,
+    access_token: crypto.randomUUID(),
     token_type: "Bearer",
     expires_in: 86400
   });
@@ -102,7 +95,7 @@ function createMcpServer() {
         };
       } catch (err) {
         return {
-          content: [{ type: "text", text: `❌ Lỗi gửi email: ${err.message}` }]
+          content: [{ type: "text", text: `❌ Lỗi: ${err.message}` }]
         };
       }
     }
@@ -111,30 +104,13 @@ function createMcpServer() {
   return server;
 }
 
-app.get("/sse", async (req, res) => {
+app.all("/mcp", async (req, res) => {
   const server = createMcpServer();
-  const transport = new SSEServerTransport("/messages", res);
-  transports[transport.sessionId] = transport;
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => crypto.randomUUID()
+  });
   await server.connect(transport);
-  res.on("close", () => delete transports[transport.sessionId]);
-});
-
-app.get("/mcp", async (req, res) => {
-  const server = createMcpServer();
-  const transport = new SSEServerTransport("/messages", res);
-  transports[transport.sessionId] = transport;
-  await server.connect(transport);
-  res.on("close", () => delete transports[transport.sessionId]);
-});
-
-app.post("/messages", async (req, res) => {
-  const sessionId = req.query.sessionId;
-  const transport = transports[sessionId];
-  if (transport) {
-    await transport.handlePostMessage(req, res);
-  } else {
-    res.status(400).json({ error: "Session not found" });
-  }
+  await transport.handleRequest(req, res);
 });
 
 app.get("/", (req, res) => {
@@ -142,18 +118,4 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`MCP server running on port ${PORT}`))
-  .on('error', (err) => {
-    console.error('Server error:', err);
-    process.exit(1);
-  });
-
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled rejection:', err);
-  process.exit(1);
-});
+app.listen(PORT, () => console.log(`MCP server running on port ${PORT}`));
