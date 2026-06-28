@@ -107,7 +107,8 @@ function createMcpServer() {
 app.all("/mcp", async (req, res) => {
   const server = createMcpServer();
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => crypto.randomUUID()
+    sessionIdGenerator: () => crypto.randomUUID(),
+    enableJsonResponse: true
   });
   await server.connect(transport);
   await transport.handleRequest(req, res);
