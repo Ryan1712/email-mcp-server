@@ -1,7 +1,7 @@
 import express from "express";
 import nodemailer from "nodemailer";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import crypto from "crypto";
 
@@ -18,6 +18,7 @@ const transporter = nodemailer.createTransport({
 });
 
 const clients = {};
+const transports = {};
 
 app.get("/.well-known/oauth-authorization-server", (req, res) => {
   const base = `https://${req.headers.host}`;
@@ -104,14 +105,31 @@ function createMcpServer() {
   return server;
 }
 
-app.all("/mcp", async (req, res) => {
+app.get("/sse", async (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
   const server = createMcpServer();
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => crypto.randomUUID(),
-    enableJsonResponse: true
+  const transport = new SSEServerTransport("/messages", res);
+  transports[transport.sessionId] = transport;
+
+  res.on("close", () => {
+    delete transports[transport.sessionId];
   });
+
   await server.connect(transport);
-  await transport.handleRequest(req, res);
+});
+
+app.post("/messages", async (req, res) => {
+  const sessionId = req.query.sessionId;
+  const transport = transports[sessionId];
+  if (transport) {
+    await transport.handlePostMessage(req, res);
+  } else {
+    res.status(400).json({ error: "Session not found" });
+  }
 });
 
 app.get("/", (req, res) => {
