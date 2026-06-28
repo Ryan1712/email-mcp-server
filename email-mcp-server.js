@@ -20,18 +20,41 @@ const transporter = nodemailer.createTransport({
 const CLIENT_ID = process.env.OAUTH_CLIENT_ID || "mcp-email-client";
 const CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || crypto.randomUUID();
 const tokens = new Set();
+const clients = {};
 
+// OAuth Discovery
 app.get("/.well-known/oauth-authorization-server", (req, res) => {
   const base = `https://${req.headers.host}`;
   res.json({
     issuer: base,
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
+    registration_endpoint: `${base}/oauth/register`,
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"]
+    grant_types_supported: ["authorization_code"],
+    token_endpoint_auth_methods_supported: ["client_secret_post", "none"]
   });
 });
 
+// Dynamic Client Registration
+app.post("/oauth/register", (req, res) => {
+  const newClientId = crypto.randomUUID();
+  const newClientSecret = crypto.randomUUID();
+  clients[newClientId] = {
+    client_secret: newClientSecret,
+    redirect_uris: req.body.redirect_uris || []
+  };
+  res.status(201).json({
+    client_id: newClientId,
+    client_secret: newClientSecret,
+    redirect_uris: req.body.redirect_uris || [],
+    grant_types: ["authorization_code"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "client_secret_post"
+  });
+});
+
+// Authorization
 app.get("/oauth/authorize", (req, res) => {
   const { redirect_uri, state } = req.query;
   const code = crypto.randomUUID();
@@ -41,6 +64,7 @@ app.get("/oauth/authorize", (req, res) => {
   res.redirect(url.toString());
 });
 
+// Token
 app.post("/oauth/token", (req, res) => {
   const token = crypto.randomUUID();
   tokens.add(token);
@@ -51,6 +75,7 @@ app.post("/oauth/token", (req, res) => {
   });
 });
 
+// MCP Server
 const server = new McpServer({
   name: "email-sender",
   version: "1.0.0"
@@ -71,16 +96,21 @@ server.tool(
       };
     }
 
-    await transporter.sendMail({
-      from: process.env.GMAIL_USER,
-      to,
-      subject,
-      text: body
-    });
-
-    return {
-      content: [{ type: "text", text: `✅ Đã gửi email tới ${to}` }]
-    };
+    try {
+      await transporter.sendMail({
+        from: process.env.GMAIL_USER,
+        to,
+        subject,
+        text: body
+      });
+      return {
+        content: [{ type: "text", text: `✅ Đã gửi email tới ${to}` }]
+      };
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `❌ Lỗi gửi email: ${err.message}` }]
+      };
+    }
   }
 );
 
@@ -101,6 +131,10 @@ app.post("/messages", async (req, res) => {
   } else {
     res.status(400).json({ error: "Session not found" });
   }
+});
+
+app.get("/", (req, res) => {
+  res.json({ name: "email-mcp-server", status: "running" });
 });
 
 const PORT = process.env.PORT || 3000;
