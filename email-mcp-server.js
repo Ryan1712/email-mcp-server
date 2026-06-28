@@ -17,12 +17,10 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-const CLIENT_ID = process.env.OAUTH_CLIENT_ID || "mcp-email-client";
-const CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET || crypto.randomUUID();
 const tokens = new Set();
 const clients = {};
+const transports = {};
 
-// OAuth Discovery
 app.get("/.well-known/oauth-authorization-server", (req, res) => {
   const base = `https://${req.headers.host}`;
   res.json({
@@ -36,7 +34,6 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
   });
 });
 
-// Dynamic Client Registration
 app.post("/oauth/register", (req, res) => {
   const newClientId = crypto.randomUUID();
   const newClientSecret = crypto.randomUUID();
@@ -54,7 +51,6 @@ app.post("/oauth/register", (req, res) => {
   });
 });
 
-// Authorization
 app.get("/oauth/authorize", (req, res) => {
   const { redirect_uri, state } = req.query;
   const code = crypto.randomUUID();
@@ -64,7 +60,6 @@ app.get("/oauth/authorize", (req, res) => {
   res.redirect(url.toString());
 });
 
-// Token
 app.post("/oauth/token", (req, res) => {
   const token = crypto.randomUUID();
   tokens.add(token);
@@ -75,48 +70,44 @@ app.post("/oauth/token", (req, res) => {
   });
 });
 
-// MCP Server
-const server = new McpServer({
-  name: "email-sender",
-  version: "1.0.0"
-});
-
-server.tool(
-  "send_email",
-  {
-    to: z.string().email(),
-    subject: z.string(),
-    body: z.string()
-  },
-  async ({ to, subject, body }) => {
-    const allowedDomain = process.env.ALLOWED_DOMAIN;
-    if (allowedDomain && !to.endsWith(`@${allowedDomain}`)) {
-      return {
-        content: [{ type: "text", text: `❌ Chỉ gửi được tới @${allowedDomain}` }]
-      };
-    }
-
-    try {
-      await transporter.sendMail({
-        from: process.env.GMAIL_USER,
-        to,
-        subject,
-        text: body
-      });
-      return {
-        content: [{ type: "text", text: `✅ Đã gửi email tới ${to}` }]
-      };
-    } catch (err) {
-      return {
-        content: [{ type: "text", text: `❌ Lỗi gửi email: ${err.message}` }]
-      };
-    }
-  }
-);
-
-const transports = {};
-
 app.get("/sse", async (req, res) => {
+  const server = new McpServer({
+    name: "email-sender",
+    version: "1.0.0"
+  });
+
+  server.tool(
+    "send_email",
+    {
+      to: z.string().email(),
+      subject: z.string(),
+      body: z.string()
+    },
+    async ({ to, subject, body }) => {
+      const allowedDomain = process.env.ALLOWED_DOMAIN;
+      if (allowedDomain && !to.endsWith(`@${allowedDomain}`)) {
+        return {
+          content: [{ type: "text", text: `❌ Chỉ gửi được tới @${allowedDomain}` }]
+        };
+      }
+      try {
+        await transporter.sendMail({
+          from: process.env.GMAIL_USER,
+          to,
+          subject,
+          text: body
+        });
+        return {
+          content: [{ type: "text", text: `✅ Đã gửi email tới ${to}` }]
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `❌ Lỗi gửi email: ${err.message}` }]
+        };
+      }
+    }
+  );
+
   const transport = new SSEServerTransport("/messages", res);
   transports[transport.sessionId] = transport;
   await server.connect(transport);
